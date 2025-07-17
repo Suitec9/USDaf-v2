@@ -23,6 +23,117 @@ contract BorrowerOperationsTest is DevTestSetup {
         vm.stopPrank();
     }
 
+    function testBatchManagerIRAdjustment() public {
+
+        priceFeed.setPrice(2200 ether);
+        uint256 ATroveId = openTroveNoHints100pct(A, 100 ether, 10000 ether, 1e17);
+
+        uint256 aliceDebt = troveManager.getTroveEntireDebt(ATroveId);
+
+        console.log("Alice entire debt:", aliceDebt);
+
+    //    uint256 BTroveId = openTroveNoHints100pct(B, 200 ether, 10000 ether, 1e16);
+
+        vm.startPrank(A);
+        borrowerOperations.registerBatchManager(1e16, 1e17, 1e16, 1e14, 7 days);
+        vm.stopPrank();
+
+        vm.startPrank(B);
+        
+        IBorrowerOperations.OpenTroveAndJoinInterestBatchManagerParams memory params = IBorrowerOperations
+            .OpenTroveAndJoinInterestBatchManagerParams({
+            owner: B,
+            ownerIndex:  0,
+            collAmount: 200 ether,
+            boldAmount: 10000 ether,
+            upperHint: 0,
+            lowerHint: 0,
+            interestBatchManager: A,
+            maxUpfrontFee: 0,
+            addManager: address(0),
+            removeManager: address(0),
+            receiver: address(0)
+        });
+    
+        uint256 BTroveId = borrowerOperations.openTroveAndJoinInterestBatchManager(params);
+        vm.stopPrank();
+
+        uint256 bobDebt = troveManager.getTroveEntireDebt(BTroveId);
+
+        uint256 accuredInterest = bobDebt - 10000 ether;
+
+        console.log("Bob's bold balance:", bobDebt);
+
+        console.log("amount owed by bob:", accuredInterest);
+
+    
+    }
+    
+    function testBatchInterestRateReversionReducesUpfrontFee() public {
+        // Open a trove in the batch manager
+        openTroveAndJoinBatchManager(A, 100e18, 5000e18, B, 5e16);
+        
+        // Initial interest rate
+        uint128 initialInterestRate = 5e16;
+        
+        vm.warp(block.timestamp + INTEREST_RATE_ADJ_COOLDOWN);
+        
+        // Increase interest rate
+        uint128 increasedInterestRate = 10e16;
+        setBatchInterestRate(B, increasedInterestRate);
+        
+        // Wait for cooldown period
+        vm.warp(block.timestamp + INTEREST_RATE_ADJ_COOLDOWN);
+        
+        // Get the upfront fee before reversion
+        uint256 upfrontFeeBeforeReversion = getUpfrontFee(B, increasedInterestRate);
+        
+        console.log("upfrontFee before reversion:", upfrontFeeBeforeReversion);
+        // Revert to the initial interest rate
+        setBatchInterestRate(B, initialInterestRate);
+        
+        // Get the upfront fee after reversion
+        uint256 upfrontFeeAfterReversion = getUpfrontFee(B, initialInterestRate);
+
+        console.log("upfrontFee after adjustment:", upfrontFeeAfterReversion);
+        
+        // Assert that the upfront fee is significantly reduced after reversion
+        assertLt(upfrontFeeAfterReversion, upfrontFeeBeforeReversion, "Upfront fee should be reduced after reversion");
+    }
+    
+    function getUpfrontFee(address batchManager, uint128 interestRate) internal returns (uint256) {
+        ITroveManager troveManagerCached = troveManager;
+        IActivePool activePoolCached = activePool;
+        
+        LatestBatchData memory batch = troveManagerCached.getLatestBatchData(batchManager);
+        
+        uint256 newDebt = batch.entireDebtWithoutRedistribution;
+        
+        TroveChange memory batchChange;
+        batchChange.batchAccruedManagementFee = batch.accruedManagementFee;
+        batchChange.oldWeightedRecordedDebt = batch.weightedRecordedDebt;
+        batchChange.newWeightedRecordedDebt = newDebt * interestRate;
+        batchChange.oldWeightedRecordedBatchManagementFee = batch.weightedRecordedBatchManagementFee;
+        batchChange.newWeightedRecordedBatchManagementFee = newDebt * batch.annualManagementFee;
+        
+//        priceFeed.setPrice(2200 ether);
+        
+        uint256 avgInterestRate = activePoolCached.getNewApproxAvgInterestRateFromTroveChange(batchChange);
+        batchChange.upfrontFee = _calcUpfrontFee(newDebt, avgInterestRate);
+        
+        return batchChange.upfrontFee;
+    }
+
+
+    function _calcUpfrontFee(uint256 _debt, uint256 _avgInterestRate) internal pure returns (uint256) {
+        return _calcInterest(_debt * _avgInterestRate, UPFRONT_INTEREST_PERIOD);
+    }
+
+    function _calcInterest(uint256 _weightedDebt, uint256 _period) internal pure returns (uint256) {
+        return _weightedDebt * _period / ONE_YEAR / DECIMAL_PRECISION;
+    }
+
+
     function testRepayingTooMuchDebtCapsAtMinDebt() public {
         uint256 troveId = openTroveNoHints100pct(A, 100 ether, 2_000 ether, 0.01 ether);
         deal(address(boldToken), A, 3_000 ether);

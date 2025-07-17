@@ -7,6 +7,7 @@ import "./TestContracts/WETH.sol";
 import "src/Zappers/WETHZapper.sol";
 
 contract ZapperWETHTest is DevTestSetup {
+
     function setUp() public override {
         // Start tests at a non-zero timestamp
         vm.warp(block.timestamp + 600);

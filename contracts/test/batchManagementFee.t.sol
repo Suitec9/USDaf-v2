@@ -309,6 +309,10 @@ contract BatchManagementFeeTest is DevTestSetup {
         // Change batch interest rate
         setBatchInterestRate(B, 10e16);
 
+        vm.warp(block.timestamp + 7 days);
+
+        setBatchInterestRate(B, 10e16);
+
         assertApproxEqAbs(
             activePool.aggRecordedDebt(), activePoolInitialDebt + batchAccruedInterest + batchAccruedManagementFee, 1
         );
